@@ -1,9 +1,30 @@
-import type { BiliDynamicItem, BiliLiveInfo, BiliPublisher, LiveStatus } from '../types';
+import type {
+    BiliDynamicItem,
+    BiliLiveInfo,
+    BiliLoginState,
+    BiliPublisher,
+    LiveStatus,
+    QrCodeGenerateResult,
+    QrCodePollResult,
+} from '../types';
+import { QrCodeLoginStatus } from '../types';
 import { pluginState } from '../core/state';
 
 const BILI_HOME = 'https://www.bilibili.com';
 const API_HOME = 'https://api.bilibili.com';
 const LIVE_API_HOME = 'https://api.live.bilibili.com';
+const PASSPORT_HOME = 'https://passport.bilibili.com';
+
+const QRCODE_GENERATE_API = `${PASSPORT_HOME}/x/passport-login/web/qrcode/generate`;
+const QRCODE_POLL_API = `${PASSPORT_HOME}/x/passport-login/web/qrcode/poll`;
+
+const QRCODE_TIMEOUT = 180 * 1000;
+
+let currentQrSession: {
+    qrcodeKey: string;
+    url: string;
+    createTime: number;
+} | null = null;
 
 // B 站接口返回字段层级不稳定，这里统一做基础归一化和容错读取。
 function normalizeUrl(value: unknown): string | undefined {
@@ -40,15 +61,47 @@ function pickNumber(value: unknown, fallback = 0): number {
     return Number.isFinite(n) ? n : fallback;
 }
 
+function parseLoginCookieFromUrl(url: string): string | null {
+    try {
+        const parsed = new URL(url);
+        const sessdata = parsed.searchParams.get('SESSDATA')?.trim() || '';
+        const biliJct = parsed.searchParams.get('bili_jct')?.trim() || '';
+        const dedeUserId = parsed.searchParams.get('DedeUserID')?.trim() || '';
+        if (!sessdata || !biliJct || !dedeUserId) return null;
+        return `SESSDATA=${sessdata}; bili_jct=${biliJct}; DedeUserID=${dedeUserId}`;
+    } catch {
+        return null;
+    }
+}
+
+function buildQrResult(
+    status: QrCodeLoginStatus,
+    message: string,
+    extra: Partial<QrCodePollResult> = {},
+): QrCodePollResult {
+    return {
+        status,
+        message,
+        statusText: extra.statusText ?? message,
+        isSuccess: extra.isSuccess ?? status === QrCodeLoginStatus.SUCCESS,
+        isExpired: extra.isExpired ?? status === QrCodeLoginStatus.EXPIRED,
+        isScanned: extra.isScanned ?? status === QrCodeLoginStatus.SCANNED,
+        login: extra.login,
+    };
+}
+
 async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
     // 所有请求统一带上 UA、Referer 和可选 Cookie，降低被拦截概率。
+    const extraHeaders = (init.headers as Record<string, string> | undefined) || {};
     const headers: Record<string, string> = {
         'User-Agent': pluginState.config.userAgent,
         Referer: BILI_HOME,
         Accept: 'application/json, text/plain, */*',
-        ...(init.headers as Record<string, string> | undefined),
+        ...extraHeaders,
     };
-    if (pluginState.config.cookie) headers.Cookie = pluginState.config.cookie;
+    if (pluginState.config.cookie && !('Cookie' in extraHeaders) && !('cookie' in extraHeaders)) {
+        headers.Cookie = pluginState.config.cookie;
+    }
 
     const res = await fetch(url, { ...init, headers });
     if (!res.ok) {
@@ -60,6 +113,15 @@ async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
         throw new Error(`Bilibili API error ${code}: ${data.message ?? data.msg ?? 'unknown'}`);
     }
     return data as T;
+}
+
+function toLoginState(cookiePresent: boolean, message: string, account?: BiliLoginState['account']): BiliLoginState {
+    return {
+        loggedIn: Boolean(account?.userId),
+        message,
+        cookiePresent,
+        account,
+    };
 }
 
 async function applyRequestDelay(): Promise<void> {
@@ -101,6 +163,143 @@ export async function fetchPublisherByUid(uid: string): Promise<BiliPublisher | 
         name: pickString(card.name, uid),
         face: normalizeUrl(card.face),
     };
+}
+
+export async function fetchLoginState(cookie = pluginState.config.cookie): Promise<BiliLoginState> {
+    const cookieValue = cookie.trim();
+    if (!cookieValue) {
+        return toLoginState(false, '未配置 Bilibili Cookie');
+    }
+
+    try {
+        const json = await callWithDelay(() => requestJson<{ data?: unknown }>(
+            `${API_HOME}/x/web-interface/nav`,
+            {
+                headers: { Cookie: cookieValue },
+            },
+        ));
+        const nav = asRecord(json.data);
+        const isLogin = Boolean(nav.isLogin ?? nav.is_login);
+        const mid = pickString(nav.mid, pickString(nav.uid));
+        if (!isLogin || !mid || mid === '0') {
+            return toLoginState(true, 'Bilibili 未登录');
+        }
+        return toLoginState(true, '登录成功', {
+            userId: mid,
+            name: pickString(nav.uname),
+            avatar: normalizeUrl(nav.face),
+        });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return toLoginState(true, message || '登录状态检查失败');
+    }
+}
+
+export async function generateQrCode(): Promise<QrCodeGenerateResult | null> {
+    try {
+        const json = await requestJson<{ data?: unknown }>(QRCODE_GENERATE_API, {
+            headers: {
+                Referer: BILI_HOME,
+                'User-Agent': pluginState.config.userAgent,
+            },
+        });
+        const data = asRecord(json.data);
+        const url = pickString(data.url);
+        const qrcodeKey = pickString(data.qrcode_key);
+        if (!url || !qrcodeKey) return null;
+        currentQrSession = {
+            qrcodeKey,
+            url,
+            createTime: Date.now(),
+        };
+        return { url, qrcode_key: qrcodeKey };
+    } catch (error) {
+        pluginState.log('error', '生成二维码异常', error);
+        return null;
+    }
+}
+
+export function getQrSessionStatus(): {
+    hasSession: boolean;
+    isExpired: boolean;
+    remainingTime: number;
+} {
+    if (!currentQrSession) {
+        return { hasSession: false, isExpired: true, remainingTime: 0 };
+    }
+    const elapsed = Date.now() - currentQrSession.createTime;
+    const remaining = Math.max(0, QRCODE_TIMEOUT - elapsed);
+    return {
+        hasSession: true,
+        isExpired: remaining <= 0,
+        remainingTime: Math.floor(remaining / 1000),
+    };
+}
+
+export async function pollQrCodeStatus(qrcodeKey?: string): Promise<QrCodePollResult> {
+    const key = qrcodeKey || currentQrSession?.qrcodeKey;
+    if (!key) {
+        currentQrSession = null;
+        return buildQrResult(QrCodeLoginStatus.EXPIRED, '无有效的二维码会话，请重新生成');
+    }
+    if (currentQrSession && Date.now() - currentQrSession.createTime > QRCODE_TIMEOUT) {
+        currentQrSession = null;
+        return buildQrResult(QrCodeLoginStatus.EXPIRED, '二维码已过期，请重新生成');
+    }
+
+    try {
+        const url = new URL(QRCODE_POLL_API);
+        url.searchParams.set('qrcode_key', key);
+        const json = await requestJson<{ data?: unknown }>(url.toString(), {
+            headers: {
+                Referer: BILI_HOME,
+                'User-Agent': pluginState.config.userAgent,
+            },
+        });
+        const data = asRecord(json.data);
+        const code = Number(data.code ?? 0);
+        const message = pickString(data.message, '未知状态');
+
+        if (code === QrCodeLoginStatus.WAITING) {
+            return buildQrResult(QrCodeLoginStatus.WAITING, '等待扫码', { statusText: '等待扫码' });
+        }
+        if (code === QrCodeLoginStatus.SCANNED) {
+            return buildQrResult(QrCodeLoginStatus.SCANNED, '已扫码，请在手机上确认', { statusText: '已扫码，请在手机上确认' });
+        }
+        if (code === QrCodeLoginStatus.EXPIRED) {
+            currentQrSession = null;
+            return buildQrResult(QrCodeLoginStatus.EXPIRED, message || '二维码已过期', { statusText: '二维码已过期' });
+        }
+        if (code === QrCodeLoginStatus.SUCCESS) {
+            const loginUrl = pickString(data.url);
+            const cookie = parseLoginCookieFromUrl(loginUrl);
+            if (!cookie) {
+                currentQrSession = null;
+                return buildQrResult(QrCodeLoginStatus.EXPIRED, '解析登录凭据失败，请重新扫码', { statusText: '解析登录凭据失败' });
+            }
+
+            const login = await fetchLoginState(cookie);
+            if (!login.loggedIn) {
+                currentQrSession = null;
+                return buildQrResult(QrCodeLoginStatus.EXPIRED, login.message || '登录校验失败', { statusText: login.message || '登录校验失败' });
+            }
+
+            pluginState.updateConfig({ cookie });
+            pluginState.markRequestSuccess();
+            currentQrSession = null;
+            return buildQrResult(QrCodeLoginStatus.SUCCESS, '登录成功', {
+                statusText: '登录成功',
+                isSuccess: true,
+                login,
+            });
+        }
+
+        return buildQrResult(QrCodeLoginStatus.EXPIRED, message, { statusText: message });
+    } catch (error) {
+        pluginState.log('error', '轮询二维码状态异常', error);
+        currentQrSession = null;
+        return buildQrResult(QrCodeLoginStatus.EXPIRED, '请求异常', { statusText: '请求异常' });
+    }
 }
 
 export async function searchPublishers(keyword: string, limit = 10): Promise<BiliPublisher[]> {

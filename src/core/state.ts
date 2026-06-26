@@ -304,6 +304,13 @@ class PluginState {
         this.saveConfig();
     }
 
+    markRequestSuccess(): void {
+        // 登录校验或接口恢复成功后，主动清掉最近错误和暂停状态。
+        this.stats.lastError = undefined;
+        this.stats.pausedUntil = undefined;
+        this.saveConfig();
+    }
+
     clearRequestPause(): void {
         this.stats.lastError = undefined;
         if (this.stats.pausedUntil && this.stats.pausedUntil <= Date.now()) {

@@ -1,7 +1,15 @@
 import type { NapCatPluginContext } from 'napcat-types/napcat-onebot/network/plugin/types';
 import { pluginState } from '../core/state';
-import type { BiliSubscription, PluginConfig } from '../types';
-import { fetchLatestDynamics, resolvePublisher, searchPublishers } from './bilibili-api';
+import type { BiliLoginState, BiliSubscription, PluginConfig } from '../types';
+import {
+    fetchLatestDynamics,
+    fetchLoginState,
+    generateQrCode,
+    getQrSessionStatus,
+    pollQrCodeStatus,
+    resolvePublisher,
+    searchPublishers,
+} from './bilibili-api';
 import { pollSubscriptions } from './subscription-service';
 
 // WebUI 通过这些 no-auth 路由直接读取和操作插件状态。
@@ -26,6 +34,67 @@ export function registerApiRoutes(ctx: NapCatPluginContext): void {
     // 配置读取接口：前端配置页启动时会先拉取一次。
     router.getNoAuth('/config', (_req, res) => {
         res.json({ code: 0, data: pluginState.config });
+    });
+
+    // 登录状态接口：用于 WebUI 查看当前 Cookie 是否可用。
+    router.getNoAuth('/login/status', async (_req, res) => {
+        try {
+            const login = await fetchLoginState();
+            res.json({ code: 0, data: login });
+        } catch (error) {
+            res.status(500).json({ code: -1, message: String(error) });
+        }
+    });
+
+    // Cookie 登录接口：先验证，再保存，避免把无效 Cookie 写进配置。
+    router.postNoAuth('/login/cookie', async (req, res) => {
+        try {
+            const body = (req.body ?? {}) as Record<string, unknown>;
+            const cookie = String(body.cookie ?? '').trim();
+            if (!cookie) {
+                return res.status(400).json({ code: -1, message: 'cookie is required' });
+            }
+
+            const login = await fetchLoginState(cookie);
+            if (!login.loggedIn) {
+                return res.status(401).json({ code: -1, message: login.message, data: login });
+            }
+
+            pluginState.updateConfig({ cookie });
+            pluginState.markRequestSuccess();
+            res.json({ code: 0, message: 'ok', data: { login, config: pluginState.config } });
+        } catch (error) {
+            res.status(500).json({ code: -1, message: String(error) });
+        }
+    });
+
+    // 生成二维码：由前端轮询状态并展示图片。
+    router.postNoAuth('/login/qrcode/generate', async (_req, res) => {
+        try {
+            const result = await generateQrCode();
+            if (!result) {
+                return res.status(500).json({ code: -1, message: '生成二维码失败' });
+            }
+            res.json({ code: 0, data: result });
+        } catch (error) {
+            res.status(500).json({ code: -1, message: String(error) });
+        }
+    });
+
+    // 轮询二维码状态：成功后后端会自动写入 Cookie。
+    router.getNoAuth('/login/qrcode/poll', async (req, res) => {
+        try {
+            const qrcodeKey = typeof req.query?.qrcode_key === 'string' ? req.query.qrcode_key : undefined;
+            const result = await pollQrCodeStatus(qrcodeKey);
+            res.json({ code: 0, data: result });
+        } catch (error) {
+            res.status(500).json({ code: -1, message: String(error) });
+        }
+    });
+
+    // 二维码会话状态：用于前端判断是否需要刷新二维码。
+    router.getNoAuth('/login/qrcode/session', (_req, res) => {
+        res.json({ code: 0, data: getQrSessionStatus() });
     });
 
     // 配置写入接口：由 WebUI 表单提交后调用。

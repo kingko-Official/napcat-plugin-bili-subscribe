@@ -9,6 +9,41 @@ export interface PluginStatus {
   subscriptions: BiliSubscription[]
 }
 
+export interface BiliLoginAccount {
+  userId?: string
+  name?: string
+  avatar?: string
+}
+
+export interface BiliLoginState {
+  loggedIn: boolean
+  message: string
+  cookiePresent: boolean
+  account?: BiliLoginAccount
+}
+
+export enum QrCodeLoginStatus {
+  WAITING = 86101,
+  SCANNED = 86090,
+  EXPIRED = 86038,
+  SUCCESS = 0,
+}
+
+export interface QrCodeGenerateResult {
+  url: string
+  qrcode_key: string
+}
+
+export interface QrCodePollResult {
+  status: QrCodeLoginStatus
+  message: string
+  statusText?: string
+  isSuccess?: boolean
+  isExpired?: boolean
+  isScanned?: boolean
+  login?: BiliLoginState
+}
+
 export interface RuntimeStats {
   processed: number
   todayProcessed: number

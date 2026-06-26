@@ -20,6 +20,46 @@ export interface PluginConfig {
     groupConfigs: Record<string, GroupConfig>;
 }
 
+// Bilibili 登录状态用于 WebUI 展示和 Cookie 校验结果返回。
+export interface BiliLoginState {
+    loggedIn: boolean;
+    message: string;
+    cookiePresent: boolean;
+    account?: BiliLoginAccount;
+}
+
+// 登录态里会带上当前账号的基础信息，方便确认 Cookie 对应的是不是目标号。
+export interface BiliLoginAccount {
+    userId?: string;
+    name?: string;
+    avatar?: string;
+}
+
+// 二维码登录状态用于轮询反馈和前端展示。
+export enum QrCodeLoginStatus {
+    WAITING = 86101,
+    SCANNED = 86090,
+    EXPIRED = 86038,
+    SUCCESS = 0,
+}
+
+// 生成二维码后返回二维码地址和轮询密钥。
+export interface QrCodeGenerateResult {
+    url: string;
+    qrcode_key: string;
+}
+
+// 二维码轮询结果只保留前端展示和登录写回所需字段。
+export interface QrCodePollResult {
+    status: QrCodeLoginStatus;
+    message: string;
+    statusText?: string;
+    isSuccess?: boolean;
+    isExpired?: boolean;
+    isScanned?: boolean;
+    login?: BiliLoginState;
+}
+
 // 群级配置目前只保留启用开关，后续可以继续扩展。
 export interface GroupConfig {
     enabled?: boolean;
