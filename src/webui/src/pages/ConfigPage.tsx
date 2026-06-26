@@ -285,6 +285,43 @@ export default function ConfigPage() {
             </div>
 
             <div className="card p-5 hover-lift">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">动态消息内容</h3>
+                <p className="text-xs text-gray-400 mb-4">勾选后，插件发送动态时会包含对应内容；不勾选则省略该项。</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                    <CheckboxRow
+                        label="标题"
+                        desc="附带动态标题"
+                        checked={config.dynamicMessageIncludeTitle}
+                        onChange={(v) => updateField('dynamicMessageIncludeTitle', v)}
+                    />
+                    <CheckboxRow
+                        label="内容"
+                        desc="附带动态正文摘要"
+                        checked={config.dynamicMessageIncludeContent}
+                        onChange={(v) => updateField('dynamicMessageIncludeContent', v)}
+                    />
+                    <CheckboxRow
+                        label="类型"
+                        desc="附带动态类型说明"
+                        checked={config.dynamicMessageIncludeType}
+                        onChange={(v) => updateField('dynamicMessageIncludeType', v)}
+                    />
+                    <CheckboxRow
+                        label="链接"
+                        desc="附带动态跳转链接"
+                        checked={config.dynamicMessageIncludeLink}
+                        onChange={(v) => updateField('dynamicMessageIncludeLink', v)}
+                    />
+                    <CheckboxRow
+                        label="图片"
+                        desc="附带首图或封面图"
+                        checked={config.dynamicMessageIncludeImage}
+                        onChange={(v) => updateField('dynamicMessageIncludeImage', v)}
+                    />
+                </div>
+            </div>
+
+            <div className="card p-5 hover-lift">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">二维码登录</h3>
                 <div className="grid gap-4 lg:grid-cols-[220px,1fr] items-center">
                     <div className="relative w-[220px] h-[220px] mx-auto lg:mx-0 rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-[#111113] flex items-center justify-center">
@@ -427,6 +464,23 @@ function InputRow({ label, desc, value, type = 'text', onChange }: {
                 onBlur={handleBlur}
                 onKeyDown={(e) => e.key === 'Enter' && handleBlur()}
             />
+        </div>
+    )
+}
+
+function CheckboxRow({ label, desc, checked, onChange }: {
+    label: string; desc: string; checked: boolean; onChange: (v: boolean) => void
+}) {
+    return (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-[#111113] px-4 py-3">
+            <div>
+                <div className="text-sm font-medium text-gray-800 dark:text-gray-200">{label}</div>
+                <div className="text-xs text-gray-400 mt-0.5">{desc}</div>
+            </div>
+            <label className="toggle">
+                <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+                <div className="slider" />
+            </label>
         </div>
     )
 }

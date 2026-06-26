@@ -15,6 +15,11 @@ export interface PluginConfig {
     maxPushPerPoll: number;
     shortUrlResolveTimeoutSeconds: number;
     requestBlockCooldownMinutes: number;
+    dynamicMessageIncludeTitle: boolean;
+    dynamicMessageIncludeContent: boolean;
+    dynamicMessageIncludeType: boolean;
+    dynamicMessageIncludeLink: boolean;
+    dynamicMessageIncludeImage: boolean;
     cookie: string;
     userAgent: string;
     groupConfigs: Record<string, GroupConfig>;

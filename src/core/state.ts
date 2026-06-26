@@ -54,6 +54,21 @@ export function sanitizeConfig(raw: unknown): PluginConfig {
             0.1,
         ),
         requestBlockCooldownMinutes: toNumber(raw.requestBlockCooldownMinutes, DEFAULT_CONFIG.requestBlockCooldownMinutes),
+        dynamicMessageIncludeTitle: typeof raw.dynamicMessageIncludeTitle === 'boolean'
+            ? raw.dynamicMessageIncludeTitle
+            : DEFAULT_CONFIG.dynamicMessageIncludeTitle,
+        dynamicMessageIncludeContent: typeof raw.dynamicMessageIncludeContent === 'boolean'
+            ? raw.dynamicMessageIncludeContent
+            : DEFAULT_CONFIG.dynamicMessageIncludeContent,
+        dynamicMessageIncludeType: typeof raw.dynamicMessageIncludeType === 'boolean'
+            ? raw.dynamicMessageIncludeType
+            : DEFAULT_CONFIG.dynamicMessageIncludeType,
+        dynamicMessageIncludeLink: typeof raw.dynamicMessageIncludeLink === 'boolean'
+            ? raw.dynamicMessageIncludeLink
+            : DEFAULT_CONFIG.dynamicMessageIncludeLink,
+        dynamicMessageIncludeImage: typeof raw.dynamicMessageIncludeImage === 'boolean'
+            ? raw.dynamicMessageIncludeImage
+            : DEFAULT_CONFIG.dynamicMessageIncludeImage,
         cookie: typeof raw.cookie === 'string' ? raw.cookie.trim() : DEFAULT_CONFIG.cookie,
         userAgent: typeof raw.userAgent === 'string' && raw.userAgent.trim()
             ? raw.userAgent.trim()
