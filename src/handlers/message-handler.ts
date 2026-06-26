@@ -1,37 +1,309 @@
-/**
- * 消息处理器
- *
- * 处理接收到的 QQ 消息事件，包含：
- * - 命令解析与分发
- * - CD 冷却管理
- * - 消息发送工具函数
- *
- * 最佳实践：将不同类型的业务逻辑拆分到不同的 handler 文件中，
- * 保持每个文件职责单一。
- */
-
 import type { OB11Message, OB11PostSendMsg } from 'napcat-types/napcat-onebot';
 import type { NapCatPluginContext } from 'napcat-types/napcat-onebot/network/plugin/types';
 import { pluginState } from '../core/state';
+import { fetchLatestDynamics, resolvePublisher, searchPublishers } from '../services/bilibili-api';
+import { pollSubscriptions } from '../services/subscription-service';
+import type { BiliSubscription } from '../types';
 
-// ==================== CD 冷却管理 ====================
+type MessageSegment = { type: string; data: Record<string, unknown> };
 
-/** CD 冷却记录 key: `${groupId}:${command}`, value: 过期时间戳 */
 const cooldownMap = new Map<string, number>();
 
-/**
- * 检查是否在 CD 中
- * @returns 剩余秒数，0 表示可用
- */
-function getCooldownRemaining(groupId: number | string, command: string): number {
-    const cdSeconds = pluginState.config.cooldownSeconds ?? 60;
-    if (cdSeconds <= 0) return 0;
+// 合并转发/图片消息需要的最小消息片段结构。
+export function textSegment(text: string): MessageSegment {
+    return { type: 'text', data: { text } };
+}
 
+export function imageSegment(file: string): MessageSegment {
+    return { type: 'image', data: { file } };
+}
+
+// 回复当前消息时自动适配群聊/私聊参数。
+export async function sendReply(
+    ctx: NapCatPluginContext,
+    event: OB11Message,
+    message: OB11PostSendMsg['message'],
+): Promise<boolean> {
+    try {
+        await pluginState.callApi('send_msg', {
+            message,
+            message_type: event.message_type,
+            ...(event.message_type === 'group' && event.group_id ? { group_id: String(event.group_id) } : {}),
+            ...(event.message_type === 'private' && event.user_id ? { user_id: String(event.user_id) } : {}),
+        });
+        return true;
+    } catch (error) {
+        pluginState.log('error', 'Failed to send reply', error);
+        return false;
+    }
+}
+
+export async function sendGroupMessage(
+    ctx: NapCatPluginContext,
+    groupId: number | string,
+    message: OB11PostSendMsg['message'],
+): Promise<boolean> {
+    try {
+        await pluginState.callApi('send_msg', {
+            message,
+            message_type: 'group',
+            group_id: String(groupId),
+        });
+        return true;
+    } catch (error) {
+        pluginState.log('error', 'Failed to send group message', error);
+        return false;
+    }
+}
+
+export async function sendPrivateMessage(
+    ctx: NapCatPluginContext,
+    userId: number | string,
+    message: OB11PostSendMsg['message'],
+): Promise<boolean> {
+    try {
+        await pluginState.callApi('send_msg', {
+            message,
+            message_type: 'private',
+            user_id: String(userId),
+        });
+        return true;
+    } catch (error) {
+        pluginState.log('error', 'Failed to send private message', error);
+        return false;
+    }
+}
+
+// 群聊里只有管理员和群主可以修改订阅类命令。
+export function isAdmin(event: OB11Message): boolean {
+    if (event.message_type !== 'group') return true;
+    const role = (event.sender as Record<string, unknown> | undefined)?.role;
+    return role === 'admin' || role === 'owner';
+}
+
+export async function handleMessage(ctx: NapCatPluginContext, event: OB11Message): Promise<void> {
+    // 只识别前缀命令，普通聊天内容不参与处理。
+    const rawMessage = event.raw_message?.trim() || '';
+    const prefix = pluginState.config.commandPrefix || '#bili';
+    if (!rawMessage.startsWith(prefix)) return;
+
+    const args = rawMessage.slice(prefix.length).trim().split(/\s+/).filter(Boolean);
+    const command = (args.shift() || 'help').toLowerCase();
+    const groupId = event.group_id ? String(event.group_id) : undefined;
+
+    // 群级开关关闭时直接忽略该群的命令。
+    if (event.message_type === 'group' && groupId && !pluginState.isGroupEnabled(groupId)) return;
+    if (event.message_type === 'group' && groupId) {
+        // 冷却是按“群 + 命令”维度计算，避免同一个群刷屏。
+        const remaining = getCooldownRemaining(groupId, command);
+        if (remaining > 0) {
+            await sendReply(ctx, event, `请等 ${remaining} 秒后再试。`);
+            return;
+        }
+        setCooldown(groupId, command);
+    }
+
+    try {
+        // 命令分发集中在这里，方便新增子命令时快速定位。
+        switch (command) {
+            case 'help':
+            case 'h':
+                await sendReply(ctx, event, buildHelp(prefix));
+                break;
+            case 'status':
+                await sendReply(ctx, event, buildStatus());
+                break;
+            case 'sub':
+            case 'subscribe':
+                await handleSubscribe(ctx, event, args, groupId);
+                break;
+            case 'unsub':
+            case 'unsubscribe':
+                await handleUnsubscribe(ctx, event, args, groupId);
+                break;
+            case 'list':
+                await handleList(ctx, event, groupId);
+                break;
+            case 'check':
+                await pollSubscriptions(ctx, true);
+                await sendReply(ctx, event, '已完成一次手动检查。');
+                break;
+            case 'search':
+                await handleSearch(ctx, event, args);
+                break;
+            case 'latest':
+                await handleLatest(ctx, event, args);
+                break;
+            default:
+                await sendReply(ctx, event, `未知命令：${command}\n发送 ${prefix} help 查看帮助。`);
+                break;
+        }
+            // 成功处理一次命令，统计计数会同步更新到状态面板。
+        pluginState.incrementProcessed();
+    } catch (error) {
+            // 任何请求或解析失败都记录下来，并把错误直接反馈给发送者。
+        pluginState.markRequestFailure(error);
+        await sendReply(ctx, event, `处理失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
+async function handleSubscribe(
+    ctx: NapCatPluginContext,
+    event: OB11Message,
+    args: string[],
+    groupId?: string,
+): Promise<void> {
+    if (!groupId) {
+        await sendReply(ctx, event, '订阅命令只能在群聊中使用。');
+        return;
+    }
+    if (!isAdmin(event)) {
+        await sendReply(ctx, event, '只有群主或管理员可以修改订阅。');
+        return;
+    }
+    const query = args.join(' ').trim();
+    if (!query) {
+        await sendReply(ctx, event, `用法：${pluginState.config.commandPrefix} sub <UID 或 UP 主名称>`);
+        return;
+    }
+
+    // 先把用户输入解析成实际 UP 主，再抓一次最新动态作为初始游标。
+    const publisher = await resolvePublisher(query);
+    if (!publisher) {
+        await sendReply(ctx, event, `没有找到 Bilibili UP：${query}`);
+        return;
+    }
+
+    const dynamics = await fetchLatestDynamics(publisher.uid).catch(() => []);
+    const latest = dynamics[0];
+    const sub: BiliSubscription = {
+        uid: publisher.uid,
+        name: publisher.name,
+        face: publisher.face,
+        groupId,
+        createdAt: Date.now(),
+        createdBy: event.user_id ? String(event.user_id) : undefined,
+        lastDynamicId: latest?.id,
+        lastDynamicTimestamp: latest?.timestamp,
+    };
+    pluginState.upsertSubscription(sub);
+    await sendReply(ctx, event, `已订阅 ${publisher.name}（UID: ${publisher.uid}）。`);
+}
+
+async function handleUnsubscribe(
+    ctx: NapCatPluginContext,
+    event: OB11Message,
+    args: string[],
+    groupId?: string,
+): Promise<void> {
+    if (!groupId) {
+        await sendReply(ctx, event, '退订命令只能在群聊中使用。');
+        return;
+    }
+    if (!isAdmin(event)) {
+        await sendReply(ctx, event, '只有群主或管理员可以修改订阅。');
+        return;
+    }
+    const uid = args[0]?.trim();
+    if (!uid) {
+        await sendReply(ctx, event, `用法：${pluginState.config.commandPrefix} unsub <UID>`);
+        return;
+    }
+    const removed = pluginState.removeSubscription(groupId, uid);
+    await sendReply(ctx, event, removed ? `已退订 UID ${uid}。` : `当前群没有订阅 UID ${uid}。`);
+}
+
+async function handleList(ctx: NapCatPluginContext, event: OB11Message, groupId?: string): Promise<void> {
+    // 群内只看本群订阅，私聊则查看全部订阅，方便管理员排查。
+    const subs = groupId
+        ? pluginState.subscriptions.filter((item) => item.groupId === groupId)
+        : pluginState.subscriptions;
+    if (subs.length === 0) {
+        await sendReply(ctx, event, '当前没有订阅。');
+        return;
+    }
+    const lines = subs.map((item, index) => {
+        const live = item.liveStatus ? ` | live: ${item.liveStatus}` : '';
+        return `${index + 1}. ${item.name} (${item.uid})${live}`;
+    });
+    await sendReply(ctx, event, lines.join('\n'));
+}
+
+async function handleSearch(ctx: NapCatPluginContext, event: OB11Message, args: string[]): Promise<void> {
+    const query = args.join(' ').trim();
+    if (!query) {
+        await sendReply(ctx, event, `用法：${pluginState.config.commandPrefix} search <UP 主名称>`);
+        return;
+    }
+    const results = await searchPublishers(query, 5);
+    if (results.length === 0) {
+        await sendReply(ctx, event, `没有找到：${query}`);
+        return;
+    }
+    await sendReply(ctx, event, results.map((item, index) => `${index + 1}. ${item.name} (${item.uid})`).join('\n'));
+}
+
+async function handleLatest(ctx: NapCatPluginContext, event: OB11Message, args: string[]): Promise<void> {
+    const uid = args[0]?.trim();
+    if (!uid) {
+        await sendReply(ctx, event, `用法：${pluginState.config.commandPrefix} latest <UID>`);
+        return;
+    }
+    const items = await fetchLatestDynamics(uid);
+    const item = items[0];
+    if (!item) {
+        await sendReply(ctx, event, `没有找到 UID ${uid} 的动态。`);
+        return;
+    }
+    await sendReply(ctx, event, [
+        `${item.authorName} 最新动态`,
+        item.title ? `标题: ${item.title}` : '',
+        item.text ? item.text.slice(0, 500) : '',
+        item.url,
+    ].filter(Boolean).join('\n'));
+}
+
+function buildHelp(prefix: string): string {
+    // 帮助文本直接拼成多行，方便群里复制阅读。
+    return [
+        'BiliSub 命令',
+        `${prefix} sub <UID|名称> - 订阅 UP 主`,
+        `${prefix} unsub <UID> - 退订 UP 主`,
+        `${prefix} list - 查看本群订阅`,
+        `${prefix} check - 立即检查`,
+        `${prefix} search <名称> - 搜索 UP 主`,
+        `${prefix} latest <UID> - 查看最新动态`,
+        `${prefix} status - 查看运行状态`,
+    ].join('\n');
+}
+
+function buildStatus(): string {
+    // 状态文本汇总运行时长、订阅数和最近轮询情况。
+    const total = pluginState.subscriptions.length;
+    const groups = new Set(pluginState.subscriptions.map((item) => item.groupId)).size;
+    const paused = pluginState.stats.pausedUntil && pluginState.stats.pausedUntil > Date.now()
+        ? `\n暂停到: ${new Date(pluginState.stats.pausedUntil).toLocaleString()}`
+        : '';
+    return [
+        'BiliSub 状态',
+        `运行: ${pluginState.getUptimeFormatted()}`,
+        `订阅: ${total} 个 UP / ${groups} 个群`,
+        `动态推送: ${pluginState.stats.pushedDynamics}`,
+        `直播推送: ${pluginState.stats.pushedLives}`,
+        `失败请求: ${pluginState.stats.failedRequests}`,
+        pluginState.stats.lastPollAt ? `上次轮询: ${new Date(pluginState.stats.lastPollAt).toLocaleString()}` : '',
+        paused.trim(),
+    ].filter(Boolean).join('\n');
+}
+
+function getCooldownRemaining(groupId: string, command: string): number {
+    // 同群同命令冷却，避免重复触发接口和刷屏。
+    const seconds = pluginState.config.cooldownSeconds;
+    if (seconds <= 0) return 0;
     const key = `${groupId}:${command}`;
-    const expireTime = cooldownMap.get(key);
-    if (!expireTime) return 0;
-
-    const remaining = Math.ceil((expireTime - Date.now()) / 1000);
+    const expireAt = cooldownMap.get(key);
+    if (!expireAt) return 0;
+    const remaining = Math.ceil((expireAt - Date.now()) / 1000);
     if (remaining <= 0) {
         cooldownMap.delete(key);
         return 0;
@@ -39,223 +311,9 @@ function getCooldownRemaining(groupId: number | string, command: string): number
     return remaining;
 }
 
-/** 设置 CD 冷却 */
-function setCooldown(groupId: number | string, command: string): void {
-    const cdSeconds = pluginState.config.cooldownSeconds ?? 60;
-    if (cdSeconds <= 0) return;
-    cooldownMap.set(`${groupId}:${command}`, Date.now() + cdSeconds * 1000);
-}
-
-// ==================== 消息发送工具 ====================
-
-/**
- * 发送消息（通用）
- * 根据消息类型自动发送到群或私聊
- *
- * @param ctx 插件上下文
- * @param event 原始消息事件（用于推断回复目标）
- * @param message 消息内容（支持字符串或消息段数组）
- */
-export async function sendReply(
-    ctx: NapCatPluginContext,
-    event: OB11Message,
-    message: OB11PostSendMsg['message']
-): Promise<boolean> {
-    try {
-        const params: OB11PostSendMsg = {
-            message,
-            message_type: event.message_type,
-            ...(event.message_type === 'group' && event.group_id
-                ? { group_id: String(event.group_id) }
-                : {}),
-            ...(event.message_type === 'private' && event.user_id
-                ? { user_id: String(event.user_id) }
-                : {}),
-        };
-        await ctx.actions.call('send_msg', params, ctx.adapterName, ctx.pluginManager.config);
-        return true;
-    } catch (error) {
-        pluginState.logger.error('发送消息失败:', error);
-        return false;
-    }
-}
-
-/**
- * 发送群消息
- */
-export async function sendGroupMessage(
-    ctx: NapCatPluginContext,
-    groupId: number | string,
-    message: OB11PostSendMsg['message']
-): Promise<boolean> {
-    try {
-        const params: OB11PostSendMsg = {
-            message,
-            message_type: 'group',
-            group_id: String(groupId),
-        };
-        await ctx.actions.call('send_msg', params, ctx.adapterName, ctx.pluginManager.config);
-        return true;
-    } catch (error) {
-        pluginState.logger.error('发送群消息失败:', error);
-        return false;
-    }
-}
-
-/**
- * 发送私聊消息
- */
-export async function sendPrivateMessage(
-    ctx: NapCatPluginContext,
-    userId: number | string,
-    message: OB11PostSendMsg['message']
-): Promise<boolean> {
-    try {
-        const params: OB11PostSendMsg = {
-            message,
-            message_type: 'private',
-            user_id: String(userId),
-        };
-        await ctx.actions.call('send_msg', params, ctx.adapterName, ctx.pluginManager.config);
-        return true;
-    } catch (error) {
-        pluginState.logger.error('发送私聊消息失败:', error);
-        return false;
-    }
-}
-
-// ==================== 合并转发消息 ====================
-
-/** 合并转发消息节点 */
-export interface ForwardNode {
-    type: 'node';
-    data: {
-        nickname: string;
-        user_id?: string;
-        content: Array<{ type: string; data: Record<string, unknown> }>;
-    };
-}
-
-/**
- * 发送合并转发消息
- * @param ctx 插件上下文
- * @param target 群号或用户 ID
- * @param isGroup 是否为群消息
- * @param nodes 合并转发节点列表
- */
-export async function sendForwardMsg(
-    ctx: NapCatPluginContext,
-    target: number | string,
-    isGroup: boolean,
-    nodes: ForwardNode[],
-): Promise<boolean> {
-    try {
-        const actionName = isGroup ? 'send_group_forward_msg' : 'send_private_forward_msg';
-        const params: Record<string, unknown> = { message: nodes };
-        if (isGroup) {
-            params.group_id = String(target);
-        } else {
-            params.user_id = String(target);
-        }
-        await ctx.actions.call(
-            actionName as 'send_group_forward_msg',
-            params as never,
-            ctx.adapterName,
-            ctx.pluginManager.config,
-        );
-        return true;
-    } catch (error) {
-        pluginState.logger.error('发送合并转发消息失败:', error);
-        return false;
-    }
-}
-
-// ==================== 权限检查 ====================
-
-/**
- * 检查群聊中是否有管理员权限
- * 私聊消息默认返回 true
- */
-export function isAdmin(event: OB11Message): boolean {
-    if (event.message_type !== 'group') return true;
-    const role = (event.sender as Record<string, unknown>)?.role;
-    return role === 'admin' || role === 'owner';
-}
-
-// ==================== 消息处理主函数 ====================
-
-/**
- * 消息处理主函数
- * 在这里实现你的命令处理逻辑
- */
-export async function handleMessage(ctx: NapCatPluginContext, event: OB11Message): Promise<void> {
-    try {
-        const rawMessage = event.raw_message || '';
-        const messageType = event.message_type;
-        const groupId = event.group_id;
-        const userId = event.user_id;
-
-        pluginState.ctx.logger.debug(`收到消息: ${rawMessage} | 类型: ${messageType}`);
-
-        // 群消息：检查该群是否启用
-        if (messageType === 'group' && groupId) {
-            if (!pluginState.isGroupEnabled(String(groupId))) return;
-        }
-
-        // 检查命令前缀
-        const prefix = pluginState.config.commandPrefix || '#cmd';
-        if (!rawMessage.startsWith(prefix)) return;
-
-        // 解析命令参数
-        const args = rawMessage.slice(prefix.length).trim().split(/\s+/);
-        const subCommand = args[0]?.toLowerCase() || '';
-
-        // TODO: 在这里实现你的命令处理逻辑
-        switch (subCommand) {
-            case 'help': {
-                const helpText = [
-                    `[= 插件帮助 =]`,
-                    `${prefix} help - 显示帮助信息`,
-                    `${prefix} ping - 测试连通性`,
-                    `${prefix} status - 查看运行状态`,
-                ].join('\n');
-                await sendReply(ctx, event, helpText);
-                break;
-            }
-
-            case 'ping': {
-                // 群消息检查 CD
-                if (messageType === 'group' && groupId) {
-                    const remaining = getCooldownRemaining(groupId, 'ping');
-                    if (remaining > 0) {
-                        await sendReply(ctx, event, `请等待 ${remaining} 秒后再试`);
-                        return;
-                    }
-                }
-
-                await sendReply(ctx, event, 'pong!');
-                if (messageType === 'group' && groupId) setCooldown(groupId, 'ping');
-                pluginState.incrementProcessed();
-                break;
-            }
-
-            case 'status': {
-                const statusText = [
-                    `[= 插件状态 =]`,
-                    `运行时长: ${pluginState.getUptimeFormatted()}`,
-                    `今日处理: ${pluginState.stats.todayProcessed}`,
-                    `总计处理: ${pluginState.stats.processed}`,
-                ].join('\n');
-                await sendReply(ctx, event, statusText);
-                break;
-            }
-
-            default: {
-                // TODO: 在这里处理你的主要命令逻辑
-                break;
-            }
-        }
-    } catch (error) {
-        pluginState.logger.error('处理消息时出错:', error);
-    }
+function setCooldown(groupId: string, command: string): void {
+    // 记录这次命令的失效时间。
+    const seconds = pluginState.config.cooldownSeconds;
+    if (seconds <= 0) return;
+    cooldownMap.set(`${groupId}:${command}`, Date.now() + seconds * 1000);
 }

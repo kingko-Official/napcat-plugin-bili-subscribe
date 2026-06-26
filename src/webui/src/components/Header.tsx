@@ -11,6 +11,7 @@ interface HeaderProps {
 }
 
 export default function Header({ title, description, isScrolled, status, currentPage }: HeaderProps) {
+    // 配置页显示“自动保存”徽标，其余页面显示插件在线状态。
     const isEnabled = status?.config?.enabled ?? false
 
     return (

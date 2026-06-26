@@ -1,24 +1,28 @@
 {
-  "name": "napcat-plugin-template",
-  "plugin": "插件模板",
+  "name": "napcat-plugin-bili-subscribe",
+  "plugin": "BiliSub",
   "version": "1.0.0",
   "type": "module",
   "main": "index.mjs",
-  "description": "NapCat 插件开发模板 - 快速开始你的插件开发",
-  "author": "Your Name",
+  "description": "Bilibili dynamic and live subscription plugin for NapCat",
+  "author": "kingko",
   "license": "MIT",
   "keywords": [
     "napcat",
     "plugin",
     "qq",
-    "template"
+    "bilibili",
+    "subscribe",
+    "dynamic",
+    "live"
   ],
   "napcat": {
     "tags": [
-      "工具"
+      "订阅",
+      "Bilibili"
     ],
     "minVersion": "4.14.0",
-    "homepage": ""
+    "homepage": "https://github.com/kingko-Official/napcat-plugin-bili-subscribe"
   },
   "dependencies": {
     "napcat-types": "0.0.16"
@@ -34,8 +38,8 @@
   },
   "scripts": {
     "build": "vite build",
-    "build:webui": "cd src/webui && pnpm install && pnpm run build",
-    "dev:webui": "cd src/webui && pnpm run dev",
+    "build:webui": "cd src/webui && npm install && npm run build",
+    "dev:webui": "cd src/webui && npm run dev",
     "watch": "vite build --watch",
     "dev": "vite build --watch",
     "push": "vite build",

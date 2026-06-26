@@ -1,4 +1,4 @@
-/** SVG 图标组件 - 全部使用内联 SVG */
+/** SVG 图标组件集合，统一放在这里便于页面复用和维护。 */
 
 interface IconProps {
     size?: number

@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+    /* 统一控制动画曲线，保证整套界面的运动感一致。 */
     --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
     --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
     --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -38,7 +39,7 @@ body {
     height: 100%;
 }
 
-/* ========== Card ========== */
+/* 卡片：统一承载状态块、设置块和表格容器。 */
 .card {
     @apply bg-white dark:bg-[#1e1e20] rounded-xl border border-gray-100 dark:border-gray-800;
     box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
@@ -55,7 +56,7 @@ body {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-/* ========== Sidebar ========== */
+/* 侧边栏：用于页面切换和主导航。 */
 .sidebar-item {
     @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-500 dark:text-gray-400 cursor-pointer text-sm font-medium relative overflow-hidden;
     transition: all 0.2s var(--ease-out-expo);
@@ -84,7 +85,7 @@ body {
     transform: scale(1.1);
 }
 
-/* ========== Scrollbar ========== */
+/* 滚动条：尽量弱化视觉存在感，但仍保留可见反馈。 */
 ::-webkit-scrollbar {
     width: 5px;
     height: 5px;
@@ -103,7 +104,7 @@ body {
     @apply bg-gray-400 dark:bg-gray-600;
 }
 
-/* ========== Input ========== */
+/* 输入框：配置页和搜索框共用同一套视觉。 */
 .input-field {
     @apply w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e20] text-gray-900 dark:text-white text-sm;
     transition: border-color 0.2s var(--ease-smooth), box-shadow 0.2s var(--ease-smooth);
@@ -114,7 +115,7 @@ body {
     box-shadow: 0 0 0 3px rgba(251, 114, 153, 0.15);
 }
 
-/* ========== Button ========== */
+/* 按钮：提供主操作、次操作和危险操作三种语义。 */
 .btn {
     @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer border-none;
     transition: all 0.2s var(--ease-smooth);
@@ -150,7 +151,7 @@ body {
     box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
 }
 
-/* ========== Toggle ========== */
+/* 开关：用于插件启用、群启用等布尔配置。 */
 .toggle {
     @apply relative inline-flex items-center cursor-pointer;
 }
@@ -185,7 +186,7 @@ body {
     width: 18px;
 }
 
-/* ========== Status Dot ========== */
+/* 状态点：在头部展示当前服务是否在线。 */
 .status-dot {
     @apply w-2 h-2 rounded-full;
     transition: background-color 0.3s, box-shadow 0.3s;
@@ -214,7 +215,7 @@ body {
     }
 }
 
-/* ========== Page Transition ========== */
+/* 页面切换：进入页面时给一点位移和淡入。 */
 @keyframes pageEnter {
     from {
         opacity: 0;
@@ -231,7 +232,7 @@ body {
     animation: pageEnter 0.45s var(--ease-out-expo) both;
 }
 
-/* ========== Staggered Children Animation ========== */
+/* 交错动画：让卡片和列表项依次出现，减少界面生硬感。 */
 .stagger-children>* {
     opacity: 0;
     animation: fadeInUp 0.4s var(--ease-out-expo) both;
@@ -273,7 +274,7 @@ body {
     animation-delay: 0.18s;
 }
 
-/* Stagger for table rows */
+/* 表格逐行延迟：适合群管理页这种密集列表。 */
 .stagger-rows tbody tr {
     opacity: 0;
     animation: fadeInUp 0.35s var(--ease-out-expo) both;
@@ -323,7 +324,7 @@ body {
     animation-delay: 0.22s;
 }
 
-/* ========== Loading Spinner ========== */
+/* 加载旋转：用于请求状态和配置读取等待。 */
 .loading-spinner {
     @apply inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full;
     animation: spin 0.6s linear infinite;
@@ -335,7 +336,7 @@ body {
     }
 }
 
-/* ========== Saving Indicator ========== */
+/* 保存提示：让自动保存或手动保存更有反馈。 */
 .saving-indicator {
     animation: savingPulse 0.6s var(--ease-out-expo) both;
 }
@@ -352,7 +353,7 @@ body {
     }
 }
 
-/* ========== Toast ========== */
+/* Toast：右上角临时提示层。 */
 @keyframes toastIn {
     from {
         opacity: 0;

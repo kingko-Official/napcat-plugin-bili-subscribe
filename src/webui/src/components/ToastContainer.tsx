@@ -8,6 +8,7 @@ const typeStyles: Record<ToastType, { bg: string; icon: React.ReactNode }> = {
     warning: { bg: 'bg-amber-500 text-white', icon: <IconAlert size={15} /> },
 }
 
+// Toast 容器固定在右上角，所有临时提示都在这里统一展示。
 export default function ToastContainer() {
     const toasts = useToasts()
 

@@ -6,6 +6,7 @@ export function useStatus() {
     const [status, setStatus] = useState<PluginStatus | null>(null)
 
     const fetchStatus = useCallback(async () => {
+        // 这里封装成 hook，页面只需要调用 fetchStatus 即可。
         try {
             const data = await noAuthFetch<PluginStatus>('/status')
             if (data.code === 0 && data.data) {

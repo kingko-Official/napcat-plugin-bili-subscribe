@@ -12,6 +12,7 @@ export default function GroupsPage() {
     const [selected, setSelected] = useState<Set<number>>(new Set())
 
     const fetchGroups = useCallback(async () => {
+        // 群列表是群管理页的主数据源，先加载再渲染表格。
         setLoading(true)
         try {
             const res = await noAuthFetch<GroupInfo[]>('/groups')
@@ -28,6 +29,7 @@ export default function GroupsPage() {
     useEffect(() => { fetchGroups() }, [fetchGroups])
 
     const toggleGroup = async (groupId: number, enabled: boolean) => {
+        // 单群切换直接落后端，前端再同步更新表格状态。
         try {
             await noAuthFetch(`/groups/${groupId}/config`, {
                 method: 'POST',
@@ -43,6 +45,7 @@ export default function GroupsPage() {
     }
 
     const bulkToggle = async (enabled: boolean) => {
+        // 批量操作基于当前选中的群集合，先检查是否真的有选中项。
         if (selected.size === 0) {
             showToast('请先选择群', 'warning')
             return
@@ -64,6 +67,7 @@ export default function GroupsPage() {
     }
 
     const toggleSelect = (groupId: number) => {
+        // 单行勾选用 Set 维护，查找和切换都更简单。
         setSelected(prev => {
             const next = new Set(prev)
             if (next.has(groupId)) next.delete(groupId)
@@ -73,6 +77,7 @@ export default function GroupsPage() {
     }
 
     const toggleSelectAll = () => {
+        // 全选和取消全选直接依赖当前过滤后的列表。
         if (selectAll) {
             setSelected(new Set())
         } else {
@@ -82,6 +87,7 @@ export default function GroupsPage() {
     }
 
     const filtered = groups.filter(g => {
+        // 搜索只做本地过滤，不再额外请求后端。
         if (!search) return true
         const q = search.toLowerCase()
         return g.group_name?.toLowerCase().includes(q) || String(g.group_id).includes(q)
@@ -100,7 +106,7 @@ export default function GroupsPage() {
 
     return (
         <div className="space-y-4">
-            {/* 工具栏 */}
+            {/* 工具栏：搜索、刷新和批量操作入口。 */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 animate-fade-in-down">
                 <div className="relative flex-1 w-full sm:max-w-xs">
                     <IconSearch size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -131,13 +137,13 @@ export default function GroupsPage() {
                 </div>
             </div>
 
-            {/* 统计 */}
+            {/* 统计：给用户一个当前群数量和启用数量的快速概览。 */}
             <p className="text-xs text-gray-400">
                 共 {groups.length} 个群，{groups.filter(g => g.enabled).length} 个已启用
                 {search && `，搜索到 ${filtered.length} 个`}
             </p>
 
-            {/* 群列表 */}
+            {/* 群列表：表格渲染所有群及其启用状态。 */}
             <div className="card overflow-hidden animate-fade-in-up">
                 <table className="w-full text-sm stagger-rows">
                     <thead>

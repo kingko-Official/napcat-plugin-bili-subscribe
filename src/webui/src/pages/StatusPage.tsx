@@ -9,6 +9,7 @@ interface StatusPageProps {
 
 /** 将毫秒格式化为可读时长 */
 function formatUptime(uptimeMs: number): string {
+    // 状态面板只需要一个人类可读的时长字符串。
     const seconds = Math.floor(uptimeMs / 1000)
     const days = Math.floor(seconds / 86400)
     const hours = Math.floor((seconds % 86400) / 3600)
@@ -22,16 +23,19 @@ function formatUptime(uptimeMs: number): string {
 }
 
 export default function StatusPage({ status, onRefresh }: StatusPageProps) {
+    // 运行时长通过“基准值 + 页面经过时间”来平滑刷新，减少接口请求频率。
     const [displayUptime, setDisplayUptime] = useState<string>('-')
     const [syncInfo, setSyncInfo] = useState<{ baseUptime: number; syncTime: number } | null>(null)
 
     useEffect(() => {
+        // 后端刷新成功时，把当前 uptime 作为新的同步基线。
         if (status?.uptime !== undefined && status.uptime > 0) {
             setSyncInfo({ baseUptime: status.uptime, syncTime: Date.now() })
         }
     }, [status?.uptime])
 
     useEffect(() => {
+        // 页面前台每秒自增一次即可，不必每秒都打接口。
         if (!syncInfo) { setDisplayUptime('-'); return }
         const updateUptime = () => {
             const elapsed = Date.now() - syncInfo.syncTime
@@ -55,6 +59,7 @@ export default function StatusPage({ status, onRefresh }: StatusPageProps) {
 
     const { config, stats } = status
 
+    // 卡片数据全部集中在数组里，后续要增减指标只改这一处。
     const statCards = [
         {
             label: '插件状态',
@@ -88,7 +93,7 @@ export default function StatusPage({ status, onRefresh }: StatusPageProps) {
 
     return (
         <div className="space-y-6">
-            {/* 统计卡片 */}
+            {/* 统计卡片：展示最核心的运行指标。 */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
                 {statCards.map((card) => (
                     <div key={card.label} className="card p-4 hover-lift">
@@ -103,7 +108,7 @@ export default function StatusPage({ status, onRefresh }: StatusPageProps) {
                 ))}
             </div>
 
-            {/* 配置概览 */}
+            {/* 配置概览：把最常用的基础参数直接暴露出来。 */}
             <div className="card p-5 hover-lift animate-fade-in-up">
                 <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
@@ -126,6 +131,7 @@ export default function StatusPage({ status, onRefresh }: StatusPageProps) {
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
+    // 统一的信息行样式，减少状态页内部重复 JSX。
     return (
         <div className="flex items-center justify-between py-1">
             <span className="text-xs text-gray-400">{label}</span>

@@ -15,7 +15,7 @@ const menuItems: { id: PageId; label: string; icon: React.ReactNode }[] = [
 export default function Sidebar({ currentPage, onPageChange }: SidebarProps) {
     return (
         <aside className="w-60 flex-shrink-0 bg-white dark:bg-[#1a1b1d] border-r border-gray-200 dark:border-gray-800 flex flex-col">
-            {/* Logo */}
+            {/* 顶部品牌区：只做识别，不承载交互。 */}
             <div className="px-5 py-6 flex items-center gap-3">
                 <div className="sidebar-logo w-8 h-8 flex items-center justify-center bg-brand-500 rounded-lg text-white">
                     <IconPlugin size={18} />
@@ -26,7 +26,7 @@ export default function Sidebar({ currentPage, onPageChange }: SidebarProps) {
                 </div>
             </div>
 
-            {/* Nav */}
+            {/* 主导航：切换不同功能页。 */}
             <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto nav-stagger">
                 {menuItems.map((item) => (
                     <div
@@ -40,7 +40,7 @@ export default function Sidebar({ currentPage, onPageChange }: SidebarProps) {
                 ))}
             </nav>
 
-            {/* Footer */}
+            {/* 底部链接：保留一个外部反馈入口。 */}
             <div className="px-3 pb-2">
                 <a
                     href="https://github.com"
@@ -53,6 +53,7 @@ export default function Sidebar({ currentPage, onPageChange }: SidebarProps) {
                 </a>
             </div>
 
+            {/* 主题提示：当前实现是跟随系统主题。 */}
             <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-800">
                 <div className="flex items-center justify-center w-full py-2 rounded-lg text-gray-500 bg-gray-50 dark:bg-gray-800/50 cursor-default text-xs gap-2">
                     <IconSun size={14} className="opacity-60" />

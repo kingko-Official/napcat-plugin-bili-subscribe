@@ -9,6 +9,7 @@ export default function ConfigPage() {
     const [saving, setSaving] = useState(false)
 
     const fetchConfig = useCallback(async () => {
+        // 配置页打开时先从后端拉取当前配置，确保编辑的是最新值。
         try {
             const res = await noAuthFetch<PluginConfig>('/config')
             if (res.code === 0 && res.data) setConfig(res.data)
@@ -18,6 +19,7 @@ export default function ConfigPage() {
     useEffect(() => { fetchConfig() }, [fetchConfig])
 
     const saveConfig = useCallback(async (update: Partial<PluginConfig>) => {
+        // 保存时先合并本地配置，再整份回传给后端。
         if (!config) return
         setSaving(true)
         try {
@@ -36,6 +38,7 @@ export default function ConfigPage() {
     }, [config])
 
     const updateField = <K extends keyof PluginConfig>(key: K, value: PluginConfig[K]) => {
+        // UI 先乐观更新，再异步保存，用户体验更顺滑。
         if (!config) return
         const updated = { ...config, [key]: value }
         setConfig(updated)
@@ -55,7 +58,7 @@ export default function ConfigPage() {
 
     return (
         <div className="space-y-6 stagger-children">
-            {/* 基础配置 */}
+            {/* 基础配置：目前只暴露最常用的几个字段。 */}
             <div className="card p-5 hover-lift">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2 mb-5">
                     <IconTerminal size={16} className="text-gray-400" />
@@ -87,7 +90,7 @@ export default function ConfigPage() {
                         type="number"
                         onChange={(v) => updateField('cooldownSeconds', Number(v) || 0)}
                     />
-                    {/* TODO: 在这里添加你的配置项 */}
+                    {/* 新配置项可以继续按同样模式往下追加。 */}
                 </div>
             </div>
 
@@ -106,6 +109,7 @@ export default function ConfigPage() {
 function ToggleRow({ label, desc, checked, onChange }: {
     label: string; desc: string; checked: boolean; onChange: (v: boolean) => void
 }) {
+    // 布尔配置统一使用开关，避免输入框带来的歧义。
     return (
         <div className="flex items-center justify-between">
             <div>
@@ -123,6 +127,7 @@ function ToggleRow({ label, desc, checked, onChange }: {
 function InputRow({ label, desc, value, type = 'text', onChange }: {
     label: string; desc: string; value: string; type?: string; onChange: (v: string) => void
 }) {
+    // 输入框做本地缓存，只有失焦或回车时才提交到后端。
     const [local, setLocal] = useState(value)
     useEffect(() => { setLocal(value) }, [value])
 

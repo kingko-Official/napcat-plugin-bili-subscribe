@@ -10,6 +10,7 @@ import { useTheme } from './hooks/useTheme'
 
 export type PageId = 'status' | 'config' | 'groups'
 
+// 每个页面的标题和副标题集中维护，切页时可以直接复用。
 const pageConfig: Record<PageId, { title: string; desc: string }> = {
     status: { title: '仪表盘', desc: '插件运行状态与数据概览' },
     config: { title: '插件配置', desc: '基础设置与参数配置' },
@@ -21,9 +22,11 @@ function App() {
     const [isScrolled, setIsScrolled] = useState(false)
     const { status, fetchStatus } = useStatus()
 
+    // 跟随系统主题切换暗色/亮色模式。
     useTheme()
 
     useEffect(() => {
+        // 进入页面后先拉一次状态，再按固定间隔刷新。
         fetchStatus()
         const interval = setInterval(fetchStatus, 5000)
         return () => clearInterval(interval)
@@ -58,10 +61,12 @@ function App() {
                     />
                     <div className="px-4 md:px-8 pb-8">
                         <div key={currentPage} className="page-enter">
+                        // 头部是否显示阴影，取决于主区域是否已经向下滚动。
                             {renderPage()}
                         </div>
                     </div>
                 </main>
+                        // 根据当前页渲染不同功能面板。
             </div>
         </div>
     )
