@@ -146,9 +146,9 @@ async function pushDynamic(ctx: NapCatPluginContext, sub: BiliSubscription, item
     // 动态消息尽量保留文本摘要，并在有图时附带首图。
     const config = pluginState.config;
     const lines = [
-        `[BiliSub] ${item.authorName || sub.name} 发布了新动态`,
+        ` ${item.authorName || sub.name} 发布了新动态`,
         config.dynamicMessageIncludeTitle && item.title ? `标题: ${item.title}` : '',
-        config.dynamicMessageIncludeContent && item.text ? `内容: ${trimText(item.text, 500)}` : '',
+        config.dynamicMessageIncludeContent && item.text ? `${trimText(item.text, 500)}` : '',
         config.dynamicMessageIncludeType && item.badge ? `类型: ${item.badge}` : '',
         config.dynamicMessageIncludeLink ? `链接: ${item.url}` : '',
     ].filter(Boolean);
@@ -170,7 +170,7 @@ async function maybePushLive(ctx: NapCatPluginContext, sub: BiliSubscription, li
     if (!previous || previous === live.status) return;
     if (live.status === 'open' && previous !== 'open') {
         const lines = [
-            `[BiliSub] ${sub.name} 开播了`,
+            ` ${sub.name} 开播了`,
             live.title ? `标题: ${live.title}` : '',
             live.area ? `分区: ${live.area}` : '',
             `直播间: https://live.bilibili.com/${live.roomId}`,
@@ -183,7 +183,7 @@ async function maybePushLive(ctx: NapCatPluginContext, sub: BiliSubscription, li
     }
 
     if (previous === 'open' && live.status === 'close') {
-        await sendGroupMessage(ctx, sub.groupId, `[BiliSub] ${sub.name} 已下播`);
+        await sendGroupMessage(ctx, sub.groupId, ` ${sub.name} 已下播`);
         pluginState.incrementPushedLives();
         pluginState.incrementProcessed();
     }
