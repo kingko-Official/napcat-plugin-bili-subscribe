@@ -113,13 +113,18 @@ async function pollOneSubscription(
 function collectUnseenDynamics(sub: BiliSubscription, dynamics: BiliDynamicItem[]): BiliDynamicItem[] {
     // 通过最后一次已知动态 ID 或时间戳，判断哪些内容还没有推送过。
     if (!sub.lastDynamicId && !sub.lastDynamicTimestamp) return [];
-    const result: BiliDynamicItem[] = [];
-    for (const item of dynamics) {
-        if (sub.lastDynamicId && item.id === sub.lastDynamicId) break;
-        if (!sub.lastDynamicId && sub.lastDynamicTimestamp && item.timestamp <= sub.lastDynamicTimestamp) break;
-        result.push(item);
+    const seenIndex = sub.lastDynamicId
+        ? dynamics.findIndex((item) => item.id === sub.lastDynamicId)
+        : -1;
+    if (seenIndex >= 0) return dynamics.slice(0, seenIndex);
+
+    if (sub.lastDynamicTimestamp) {
+        const lastTimestamp = sub.lastDynamicTimestamp;
+        const timeIndex = dynamics.findIndex((item) => item.timestamp <= lastTimestamp);
+        if (timeIndex >= 0) return dynamics.slice(0, timeIndex);
     }
-    return result;
+
+    return [];
 }
 
 // 直播轮询和动态轮询共用同一个执行窗口，避免批量请求过大。
@@ -139,15 +144,16 @@ async function pollLiveStatuses(ctx: NapCatPluginContext, subscriptions: BiliSub
 
 async function pushDynamic(ctx: NapCatPluginContext, sub: BiliSubscription, item: BiliDynamicItem): Promise<void> {
     // 动态消息尽量保留文本摘要，并在有图时附带首图。
+    const config = pluginState.config;
     const lines = [
         `[BiliSub] ${item.authorName || sub.name} 发布了新动态`,
-        item.title ? `标题: ${item.title}` : '',
-        item.text ? trimText(item.text, 500) : '',
-        item.badge ? `类型: ${item.badge}` : '',
-        `链接: ${item.url}`,
+        config.dynamicMessageIncludeTitle && item.title ? `标题: ${item.title}` : '',
+        config.dynamicMessageIncludeContent && item.text ? `内容: ${trimText(item.text, 500)}` : '',
+        config.dynamicMessageIncludeType && item.badge ? `类型: ${item.badge}` : '',
+        config.dynamicMessageIncludeLink ? `链接: ${item.url}` : '',
     ].filter(Boolean);
 
-    const imageUrl = item.images[0] ?? item.cover;
+    const imageUrl = config.dynamicMessageIncludeImage ? (item.images[0] ?? item.cover) : undefined;
     const message = imageUrl
         ? [textSegment(lines.join('\n') + '\n'), imageSegment(imageUrl)]
         : lines.join('\n');
